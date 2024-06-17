@@ -202,6 +202,8 @@ class MambaBlock(nn.Module):
         self.D = nn.Parameter(torch.ones(args.d_inner))
         self.out_proj = nn.Linear(args.d_inner, args.d_model, bias=args.bias)
         
+        self.B = 0
+        # self.C = 0
 
     def forward(self, x):
         """Mamba block forward. This looks the same as Figure 3 in Section 3.4 in the Mamba paper [1].
@@ -266,7 +268,10 @@ class MambaBlock(nn.Module):
         
         (delta, B, C) = x_dbl.split(split_size=[self.args.dt_rank, n, n], dim=-1)  # delta: (b, l, dt_rank). B, C: (b, l, n)
         delta = F.softplus(self.dt_proj(delta))  # (b, l, d_in)
-        
+    
+        self.Bs = B.shape
+        self.Cs = C.shape
+
         y = self.selective_scan(x, delta, A, B, C, D)  # This is similar to run_SSM(A, B, C, u) in The Annotated S4 [2]
         
         return y
@@ -321,7 +326,7 @@ class MambaBlock(nn.Module):
         y = torch.stack(ys, dim=1)  # shape (b, l, d_in)
         
         y = y + u * D
-    
+
         return y
 
 
