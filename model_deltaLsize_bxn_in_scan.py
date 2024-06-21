@@ -348,7 +348,7 @@ class MambaBlock(nn.Module):
         self.deltaB_u = deltaB_u
 
         grad = Luen_grad
-        L = repeat(self.L,'b n -> b l n',l=l) # 也可直接设置L(b l n)
+        L = repeat(self.L,'b n -> b l n',l=l)[:b] # 也可直接设置L(b l n)
         deltaL_grad = einsum(delta, L, grad, 'b l d_in, b l n, b l d_in -> b l d_in n')
 
         # Perform selective scan (see scan_SSM() in The Annotated S4 [2])
@@ -368,7 +368,7 @@ class MambaBlock(nn.Module):
             # x = deltaA[:, i] * x + deltaB_u[:, i]
             
             # 龙贝格增益  grad尺寸时变，L尺寸固定为batch_size
-            x = deltaA[:, i] * x + deltaB_u[:, i] + deltaL_grad[:b, i] # 改动3 
+            x = deltaA[:, i] * x + deltaB_u[:, i] + deltaL_grad[:, i] # 改动3 
   
             y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
             ys.append(y)
