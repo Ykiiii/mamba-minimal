@@ -248,6 +248,7 @@ class MambaBlock(nn.Module):
 
         if Luen_grad is None:
             Luen_grad = torch.zeros(b,l,64)
+        self.Luen_grad = Luen_grad
         # self.intermediate_output = x
         y = self.ssm(x, Luen_grad)
         self.intermediate_output = y
@@ -367,7 +368,7 @@ class MambaBlock(nn.Module):
             # x = deltaA[:, i] * x + deltaB_u[:, i]
             
             # 龙贝格增益  grad尺寸时变，L尺寸固定为batch_size
-            x = deltaA[:, i] * x + deltaB_u[:, i] + deltaL_grad[:, i] # 改动3 
+            x = deltaA[:, i] * x + deltaB_u[:, i] + deltaL_grad[:b, i] # 改动3 
   
             y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
             ys.append(y)
