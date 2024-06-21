@@ -1,6 +1,6 @@
 """Simple, minimal implementation of Mamba in one file of PyTorch.
 
-隆贝格在scan阶段 x=Ax+Bu+Lgrad
+隆贝格在scan阶段 x=A(x+inv(A)*L*grad)+Bu
 
 
 Suggest reading the following before/while reading the code:
