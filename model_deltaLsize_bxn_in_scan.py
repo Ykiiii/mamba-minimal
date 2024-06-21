@@ -201,7 +201,7 @@ class MambaBlock(nn.Module):
         
         # dt_proj projects Δ from dt_rank to d_in
         self.dt_proj = nn.Linear(args.dt_rank, args.d_inner, bias=True)
-
+        # 初始化A、D
         A = repeat(torch.arange(1, args.d_state + 1), 'n -> d n', d=args.d_inner)
         self.A_log = nn.Parameter(torch.log(A))
         self.D = nn.Parameter(torch.ones(args.d_inner))
@@ -214,12 +214,8 @@ class MambaBlock(nn.Module):
         L = torch.normal(0,math.sqrt(1/8)/3,(args.batch_size, self.args.d_state), device=self.A_log.device)
         self.L = nn.Parameter(L)
         # self.L = L
-
+        self.ress = 0
         self.B = 0
-
-        self.aaa0=0
-        self.aaaa1=0
-
 
     def forward(self, x, Luen_grad=None):
         """Mamba block forward. This looks the same as Figure 3 in Section 3.4 in the Mamba paper [1].
@@ -241,6 +237,7 @@ class MambaBlock(nn.Module):
         
         x_and_res = self.in_proj(x)  # shape (b, l, 2 * d_in)
         (x, res) = x_and_res.split(split_size=[self.args.d_inner, self.args.d_inner], dim=-1)
+        self.ress = res.shape
 
         x = rearrange(x, 'b l d_in -> b d_in l')
         x = self.conv1d(x)[:, :, :l]
@@ -344,10 +341,15 @@ class MambaBlock(nn.Module):
         
         # 进入for之前先处理一遍u
         
-        deltaA = torch.exp(einsum(delta, A, 'b l d_in, d_in n -> b l d_in n'))
+        deltaA = torch.exp(einsum(delta, A, 'b l d_in, d_in n -> b l d_in n')) # deltaA=exp(delta*A)
         deltaB_u = einsum(delta, B, u, 'b l d_in, b l n, b l d_in -> b l d_in n')
         self.deltaA = deltaA
         self.deltaB_u = deltaB_u
+
+        grad = Luen_grad
+        L = repeat(self.L,'b n -> b l n',l=l) # 也可直接设置L(b l n)
+        deltaL_grad = einsum(delta, L, grad, 'b l d_in, b l n, b l d_in -> b l d_in n')
+
         # Perform selective scan (see scan_SSM() in The Annotated S4 [2])
         # Note that the below is sequential, while the official implementation does a much faster parallel scan that
         # is additionally hardware-aware (like FlashAttention).
@@ -365,17 +367,8 @@ class MambaBlock(nn.Module):
             # x = deltaA[:, i] * x + deltaB_u[:, i]
             
             # 龙贝格增益  grad尺寸时变，L尺寸固定为batch_size
-            grad = Luen_grad[:,i]
-            luen = einsum(self.L,grad,'b n,b d_in -> b d_in n') 
-            x = deltaA[:, i] * x + deltaB_u[:, i] + luen[:b] # 改动3 
-            aaaa1 = x
-            # # 龙贝格增益  grad尺寸时变，L尺寸固定为1
-            # grad = Luen_grad[:,i]
-            # L = self.L.repeat(b,1)
-            # luen = einsum(L,grad,'b n,b d_in -> b d_in n') 
-            # x = deltaA[:, i] * x + deltaB_u[:, i] + luen # 改动3 
-
-
+            x = deltaA[:, i] * x + deltaB_u[:, i] + deltaL_grad[:, i] # 改动3 
+  
             y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
             ys.append(y)
         y = torch.stack(ys, dim=1)  # shape (b, l, d_in)
