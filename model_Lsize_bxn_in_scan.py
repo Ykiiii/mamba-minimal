@@ -352,6 +352,9 @@ class MambaBlock(nn.Module):
         # Note that the below is sequential, while the official implementation does a much faster parallel scan that
         # is additionally hardware-aware (like FlashAttention).
 
+        grad = Luen_grad[:b]
+        L = repeat(self.L,'b n -> b l n',l=l)[:b] # 也可直接设置L(b l n)
+        deltaL_grad = einsum(L, grad, 'b l n, b l d_in -> b l d_in n')
         #输入中x的维度是b l d_in,在这里变了？并不是,扫描过程x 是作为u传入的
         # 所以仍旧需要x的伪逆，计算A+grad/x
         # 或者需要u的伪逆，计算B+grad/u
@@ -364,11 +367,9 @@ class MambaBlock(nn.Module):
         for i in range(l):
             # x = deltaA[:, i] * x + deltaB_u[:, i]
             
-            # 龙贝格增益  grad尺寸时变，L尺寸固定为batch_size
-            grad = Luen_grad[:,i]
-            luen = einsum(self.L,grad,'b n,b d_in -> b d_in n') 
-            x = deltaA[:, i] * x + deltaB_u[:, i] + luen[:b] # 改动3 
-            aaaa1 = x
+            # 龙贝格增益  grad尺寸时变，L尺寸跟着变，做切片
+            x = deltaA[:, i] * x + deltaB_u[:, i] + deltaL_grad[:b,i] # 改动3 
+
             # # 龙贝格增益  grad尺寸时变，L尺寸固定为1
             # grad = Luen_grad[:,i]
             # L = self.L.repeat(b,1)
