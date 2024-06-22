@@ -354,7 +354,7 @@ class MambaBlock(nn.Module):
 
         grad = Luen_grad[:b]
         L = repeat(self.L,'b n -> b l n',l=l)[:b] # 也可直接设置L(b l n)
-        deltaL_grad = einsum(L, grad, 'b l n, b l d_in -> b l d_in n')
+        deltaL_grad = einsum(L, grad, 'b l n, b l d_in -> b l d_in n').to(deltaA.device)
         #输入中x的维度是b l d_in,在这里变了？并不是,扫描过程x 是作为u传入的
         # 所以仍旧需要x的伪逆，计算A+grad/x
         # 或者需要u的伪逆，计算B+grad/u
