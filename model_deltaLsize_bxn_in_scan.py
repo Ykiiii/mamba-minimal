@@ -350,6 +350,8 @@ class MambaBlock(nn.Module):
         grad = Luen_grad
         L = repeat(self.L,'b n -> b l n',l=l)[:b] # 也可直接设置L(b l n)
         deltaL_grad = einsum(delta, L, grad, 'b l d_in, b l n, b l d_in -> b l d_in n')
+        # 注：最后一个训练batch中数据的batchsize小于最初设定，直接切片
+        #     在测试集中size如果大于grad的尺寸，这里会报错，所以用dataloader
 
         # Perform selective scan (see scan_SSM() in The Annotated S4 [2])
         # Note that the below is sequential, while the official implementation does a much faster parallel scan that
