@@ -211,7 +211,7 @@ class MambaBlock(nn.Module):
         # L 的尺寸有讲究
         self.intermediate_output = None # 初始化hook，提取grad
         # L = torch.zeros((args.batch_size, self.args.d_state), device=self.A_log.device)
-        L = torch.normal(0,math.sqrt(1/8)/3,(args.batch_size, self.args.d_state), device=self.A_log.device)
+        L = torch.normal(0,math.sqrt(1/8)/3,(self.args.d_state,), device=self.A_log.device)
         self.L = nn.Parameter(L)
         # self.L = L
         self.ress = 0
@@ -237,7 +237,7 @@ class MambaBlock(nn.Module):
         
         x_and_res = self.in_proj(x)  # shape (b, l, 2 * d_in)
         (x, res) = x_and_res.split(split_size=[self.args.d_inner, self.args.d_inner], dim=-1)
-        self.ress = res.shape
+        self.ress = res
 
         x = rearrange(x, 'b l d_in -> b d_in l')
         x = self.conv1d(x)[:, :, :l]
@@ -249,11 +249,12 @@ class MambaBlock(nn.Module):
         if Luen_grad is None:
             Luen_grad = torch.zeros(b,l,64)
         self.Luen_grad = Luen_grad
-        # self.intermediate_output = x
-        y = self.ssm(x, Luen_grad)
-        self.intermediate_output = y
 
-        y = y * F.silu(res)
+        y = self.ssm(x, Luen_grad)
+        # self.intermediate_output = y.clone().detach().requires_grad_(True)
+        self.intermediate_output = y
+        res_silued = F.silu(res)
+        y = self.intermediate_output * res_silued  # 应该是res的梯度，loss对res的偏导，才是L*e
         
         output = self.out_proj(y)
 
@@ -334,7 +335,7 @@ class MambaBlock(nn.Module):
         (b, l, d_in) = u.shape
         self.batch = b
         n = A.shape[1]
-        
+        # b = min(u.shape[0],Luen_grad.shape[0])
         # Discretize continuous parameters (A, B)
         # - A is discretized using zero-order hold (ZOH) discretization (see Section 2 Equation 4 in the Mamba paper [1])
         # - B is discretized using a simplified Euler discretization instead of ZOH. From a discussion with authors:
@@ -348,7 +349,7 @@ class MambaBlock(nn.Module):
         self.deltaB_u = deltaB_u
 
         grad = Luen_grad[:b]
-        L = repeat(self.L,'b n -> b l n',l=l)[:b] # 也可直接设置L(b l n)
+        L = repeat(self.L,'n -> b l n',b=b,l=l) # 也可直接设置L(b l n)
         deltaL_grad = einsum(delta, L, grad, 'b l d_in, b l n, b l d_in -> b l d_in n').to(deltaA.device)
         # 注：最后一个训练batch中数据的batchsize小于最初设定，直接切片
         #     在测试集中size如果大于grad的尺寸，这里会报错，所以用dataloader
@@ -363,14 +364,12 @@ class MambaBlock(nn.Module):
         # 或者增加 L * grad 项，L作为参数参与迭代
         x = torch.zeros((b, d_in, n), device=deltaA.device) 
 
-        global aaa0,aaaa1
-        aaa0 = x
         ys = []    
         for i in range(l):
             # x = deltaA[:, i] * x + deltaB_u[:, i]
             
             # 龙贝格增益  grad尺寸时变，L尺寸固定为batch_size
-            x = deltaA[:, i] * x + deltaB_u[:, i] + deltaL_grad[:, i] # 改动3 
+            x = deltaA[:b, i] * x + deltaB_u[:b, i] + deltaL_grad[:, i] # 改动3 
   
             y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
             ys.append(y)
@@ -380,10 +379,7 @@ class MambaBlock(nn.Module):
 
         return y
 
-    def get_a(self):
-        def aa():
-            return aaa0,aaaa1
-        return aa
+  
 
 class RMSNorm(nn.Module):
     def __init__(self,
