@@ -209,8 +209,8 @@ class MambaBlock(nn.Module):
 
         # L（b,n） ,grad(b,l,d_in), grad取自ssm的输出，
         # L 的尺寸有讲究
-        self.intermediate_output = None # 初始化hook，提取grad
-        L = torch.zeros((1, self.args.d_state), device=self.A_log.device)
+        # self.intermediate_output = None # 初始化hook，提取grad
+        L = torch.normal(0,math.sqrt(1/8)/3,(self.args.d_state,), device=self.A_log.device)
         self.L = nn.Parameter(L)
         # self.L = L
 
@@ -344,6 +344,10 @@ class MambaBlock(nn.Module):
         # Note that the below is sequential, while the official implementation does a much faster parallel scan that
         # is additionally hardware-aware (like FlashAttention).
 
+        grad = Luen_grad[:b]
+        L = repeat(self.L,'n -> b l n',b=b,l=l) # 也可直接设置L(b l n)
+        deltaL_grad = einsum(L, grad, 'b l n, b l d_in -> b l d_in n').to(deltaA.device)
+  
         #输入中x的维度是b l d_in,在这里变了？并不是,扫描过程x 是作为u传入的
         # 所以仍旧需要x的伪逆，计算A+grad/x
         # 或者需要u的伪逆，计算B+grad/u
@@ -360,10 +364,8 @@ class MambaBlock(nn.Module):
             # x = deltaA[:, i] * x + deltaB_u[:, i] + luen # 改动3 
 
             # 龙贝格观测器  grad尺寸时变，L尺寸固定为1
-            grad = Luen_grad[:,i]
-            L = self.L.repeat(b,1)
-            luen = einsum(L,grad,'b n,b d_in -> b d_in n') 
-            x = deltaA[:, i] * x + deltaB_u[:, i] + luen # 改动3 
+ 
+            x = deltaA[:, i] * x + deltaB_u[:, i] + deltaL_grad[:, i] # 改动3  
 
 
             y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
