@@ -253,8 +253,8 @@ class MambaBlock(nn.Module):
         y = self.ssm(x, Luen_grad)
         # self.intermediate_output = y.clone().detach().requires_grad_(True)
         self.intermediate_output = y
-        y = F.silu(res)
-        # y = self.intermediate_output * res_silued  # 应该是res的梯度，loss对res的偏导，才是L*e
+        res_silued = F.silu(res)
+        y = self.intermediate_output * res_silued  # 应该是res的梯度，loss对res的偏导，才是L*e
         
         output = self.out_proj(y)
 
