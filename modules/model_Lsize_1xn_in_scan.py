@@ -358,11 +358,6 @@ class MambaBlock(nn.Module):
         for i in range(l):
             # x = deltaA[:, i] * x + deltaB_u[:, i]
             
-            # # 龙贝格观测器  grad尺寸时变，L尺寸固定为batch_size
-            # grad = Luen_grad[:,i]
-            # luen = einsum(self.L,grad,'b n,b d_in -> b d_in n') 
-            # x = deltaA[:, i] * x + deltaB_u[:, i] + luen # 改动3 
-
             # 龙贝格观测器  grad尺寸时变，L尺寸固定为1
  
             x = deltaA[:, i] * x + deltaB_u[:, i] + deltaL_grad[:, i] # 改动3  
