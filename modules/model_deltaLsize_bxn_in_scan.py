@@ -357,10 +357,7 @@ class MambaBlock(nn.Module):
         # Note that the below is sequential, while the official implementation does a much faster parallel scan that
         # is additionally hardware-aware (like FlashAttention).
 
-        #输入中x的维度是b l d_in,在这里变了？并不是,扫描过程x 是作为u传入的
-        # 所以仍旧需要x的伪逆，计算A+grad/x
-        # 或者需要u的伪逆，计算B+grad/u
-        # 或者增加 L * grad 项，L作为参数参与迭代
+
         x = torch.zeros((b, d_in, n), device=deltaA.device) 
 
         global aaa0,aaaa1

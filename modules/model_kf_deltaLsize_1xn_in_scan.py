@@ -1,6 +1,6 @@
 """Simple, minimal implementation of Mamba in one file of PyTorch.
 
-隆贝格在scan阶段 x=Ax+Bu+Lgrad
+隆贝格在scan阶段 x=A(x+inv(A)*L*grad)+Bu
 
 
 Suggest reading the following before/while reading the code:
@@ -38,7 +38,7 @@ class ModelArgs:
     d_model: int
     n_layer: int
     vocab_size: int
-    d_state: int = 64
+    d_state: int = 16
     expand: int = 2
     dt_rank: Union[int, str] = 'auto'
     d_conv: int = 4 
@@ -201,7 +201,7 @@ class MambaBlock(nn.Module):
         
         # dt_proj projects Δ from dt_rank to d_in
         self.dt_proj = nn.Linear(args.dt_rank, args.d_inner, bias=True)
-
+        # 初始化A、D
         A = repeat(torch.arange(1, args.d_state + 1), 'n -> d n', d=args.d_inner)
         self.A_log = nn.Parameter(torch.log(A))
         self.D = nn.Parameter(torch.ones(args.d_inner))
@@ -209,13 +209,13 @@ class MambaBlock(nn.Module):
 
         # L（b,n） ,grad(b,l,d_in), grad取自ssm的输出，
         # L 的尺寸有讲究
-        # self.intermediate_output = None # 初始化hook，提取grad
+        self.intermediate_output = None # 初始化hook，提取grad
+        # L = torch.zeros((args.batch_size, self.args.d_state), device=self.A_log.device)
         L = torch.normal(0,math.sqrt(1/8)/3,(self.args.d_state,), device=self.A_log.device)
         self.L = nn.Parameter(L)
         # self.L = L
-
+        self.ress = 0
         self.B = 0
-        self.C = 0
 
     def forward(self, x, Luen_grad=None):
         """Mamba block forward. This looks the same as Figure 3 in Section 3.4 in the Mamba paper [1].
@@ -231,11 +231,13 @@ class MambaBlock(nn.Module):
             mamba_inner_ref(), https://github.com/state-spaces/mamba/blob/main/mamba_ssm/ops/selective_scan_interface.py#L311
             
         """
+
         (b, l, d) = x.shape
         self.xs1 = x.shape
         
         x_and_res = self.in_proj(x)  # shape (b, l, 2 * d_in)
         (x, res) = x_and_res.split(split_size=[self.args.d_inner, self.args.d_inner], dim=-1)
+        self.ress = res
 
         x = rearrange(x, 'b l d_in -> b d_in l')
         x = self.conv1d(x)[:, :, :l]
@@ -245,12 +247,14 @@ class MambaBlock(nn.Module):
         self.xs2 = x.shape
 
         if Luen_grad is None:
-            Luen_grad = torch.zeros(1,l,64)
-        # self.intermediate_output = x
+            Luen_grad = torch.zeros(b,l,64)
+        self.Luen_grad = Luen_grad
+
         y = self.ssm(x, Luen_grad)
+        # self.intermediate_output = y.clone().detach().requires_grad_(True)
         self.intermediate_output = y
-        
-        y = y * F.silu(res)
+        res_silued = F.silu(res)
+        y = self.intermediate_output * res_silued  # 应该是res的梯度，loss对res的偏导，才是L*e
         
         output = self.out_proj(y)
 
@@ -290,7 +294,7 @@ class MambaBlock(nn.Module):
         # grad (batchsize,l,64)
         self.As = A.shape
         self.Bs = B.shape
-        self.C = C
+        self.Cs = C.shape
         self.Ds = D.shape
         self.deltas = delta.shape
         self.delta = delta
@@ -331,42 +335,38 @@ class MambaBlock(nn.Module):
         (b, l, d_in) = u.shape
         self.batch = b
         n = A.shape[1]
-        
+        # b = min(u.shape[0],Luen_grad.shape[0])
         # Discretize continuous parameters (A, B)
         # - A is discretized using zero-order hold (ZOH) discretization (see Section 2 Equation 4 in the Mamba paper [1])
         # - B is discretized using a simplified Euler discretization instead of ZOH. From a discussion with authors:
         #   "A is the more important term and the performance doesn't change much with the simplification on B"
-        deltaA = torch.exp(einsum(delta, A, 'b l d_in, d_in n -> b l d_in n'))
+        
+        # 进入for之前先处理一遍u
+        
+        deltaA = torch.exp(einsum(delta, A, 'b l d_in, d_in n -> b l d_in n')) # deltaA=exp(delta*A)
         deltaB_u = einsum(delta, B, u, 'b l d_in, b l n, b l d_in -> b l d_in n')
         self.deltaA = deltaA
         self.deltaB_u = deltaB_u
+
+        grad = Luen_grad[:b]
+        L = repeat(self.L,'n -> b l n',b=b,l=l) # 也可直接设置L(b l n)
+        deltaL_grad = einsum(delta, L, grad, 'b l d_in, b l n, b l d_in -> b l d_in n').to(deltaA.device)
+        # 注：最后一个训练batch中数据的batchsize小于最初设定，直接切片
+        #     在测试集中size如果大于grad的尺寸，这里会报错，所以用dataloader
+
         # Perform selective scan (see scan_SSM() in The Annotated S4 [2])
         # Note that the below is sequential, while the official implementation does a much faster parallel scan that
         # is additionally hardware-aware (like FlashAttention).
 
-        grad = Luen_grad[:b]
-        L = repeat(self.L,'n -> b l n',b=b,l=l) # 也可直接设置L(b l n)
-        L_grad = einsum(L, grad, 'b l n, b l d_in -> b l d_in n').to(deltaA.device)
-  
-        #输入中x的维度是b l d_in,在这里变了？并不是,扫描过程x 是作为u传入的
-        # 所以仍旧需要x的伪逆，计算A+grad/x
-        # 或者需要u的伪逆，计算B+grad/u
-        # 或者增加 L * grad 项，L作为参数参与迭代
         x = torch.zeros((b, d_in, n), device=deltaA.device) 
 
         ys = []    
         for i in range(l):
-            # x = deltaA[:, i] * x + deltaB_u[:, i]
-            
-            # # 龙贝格观测器  grad尺寸时变，L尺寸固定为batch_size
-            # grad = Luen_grad[:,i]
-            # luen = einsum(self.L,grad,'b n,b d_in -> b d_in n') 
-            # x = deltaA[:, i] * x + deltaB_u[:, i] + luen # 改动3 
+            # # luen  grad尺寸时变，L尺寸固定为batch_size
+            # x = deltaA[:b, i] * x + deltaB_u[:b, i] + deltaL_grad[:, i] # 改动3 
+            # karman
 
-            # 龙贝格观测器  grad尺寸时变，L尺寸固定为1
- 
-            x = deltaA[:, i] * x + deltaB_u[:, i] + L_grad[:, i] # 改动3  
-
+            x = deltaA[:b, i] * x + deltaB_u[:b, i] + deltaL_grad[:, i]
 
             y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
             ys.append(y)
@@ -376,6 +376,7 @@ class MambaBlock(nn.Module):
 
         return y
 
+  
 
 class RMSNorm(nn.Module):
     def __init__(self,
