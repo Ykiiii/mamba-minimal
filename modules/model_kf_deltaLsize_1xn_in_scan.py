@@ -293,6 +293,7 @@ class MambaBlock(nn.Module):
         # grad (batchsize,l,64)
         delta = F.softplus(self.dt_proj(delta))  # (b, l, d_in)
         # grad (batchsize,l,64)
+        self.C = C
         self.As = A.shape
         self.Bs = B.shape
         self.Cs = C.shape
@@ -351,7 +352,8 @@ class MambaBlock(nn.Module):
 
         grad = Luen_grad[:b]
         L = repeat(self.L,'n -> b l n',b=b,l=l) # 每个batch、每个length一样
-        delta_grad = einsum(delta, grad, 'b l d_in, b l d_in -> b l d_in n').to(deltaA.device)
+        self.deltaL = einsum(delta, L, 'b l d_in, b l n -> b l d_in n')
+        # delta_grad = einsum(delta, grad, 'b l d_in, b l d_in -> b l d_in n').to(deltaA.device)
         # 注：最后一个训练batch中数据的batchsize小于最初设定，直接切片
         #     在测试集中size如果大于grad的尺寸，这里会报错，所以用dataloader
 
@@ -365,13 +367,14 @@ class MambaBlock(nn.Module):
         ys = []    
         for i in range(l):
             # # luen  grad尺寸时变，L尺寸固定为batch_size
-            # x = deltaA[:b, i] * x + deltaB_u[:b, i] + deltaL_grad[:, i] # 改动3 
+            # x = deltaA[:b, i] * x + deltaB_u[:b, i] # 改动3 
             # karman
-            x = deltaA[:b, i] * x + deltaB_u[:b, i]
+            # x = deltaA[:b, i] * x + deltaB_u[:b, i]
             for j in range(b):
-                P = (A[j,i]@P)@A[j,i].T+self.Q
+                P = (deltaA[j,i]@P)@deltaA[j,i].T+self.Q
+                print(P)
                 Ct = C[j,i].view(1,n)
-                K = P*torch.inverse(Ct@P@Ct.T+self.R)
+                K = (P@Ct.T)*torch.inverse(Ct@P@Ct.T+self.R)
                 P = (torch.eye(n)-einops.einsum(K, Ct, 'd_in n,o n -> d_in n'))@P
             x = x + einops.einsum(K, grad[:,i], 'd_in n,b d_in ->b d_in n')
 
@@ -380,7 +383,6 @@ class MambaBlock(nn.Module):
         y = torch.stack(ys, dim=1)  # shape (b, l, d_in)
         
         y = y + u * D
-
         return y
 
   
