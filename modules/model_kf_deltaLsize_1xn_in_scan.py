@@ -372,7 +372,7 @@ class MambaBlock(nn.Module):
             # x = deltaA[:b, i] * x + deltaB_u[:b, i]
             for j in range(b):
                 P = (deltaA[j,i]@P)@deltaA[j,i].T+self.Q
-                print(P)
+                # print(P)
                 Ct = C[j,i].view(1,n)
                 K = (P@Ct.T)*torch.inverse(Ct@P@Ct.T+self.R)
                 P = (torch.eye(n)-einops.einsum(K, Ct, 'd_in n,o n -> d_in n'))@P
