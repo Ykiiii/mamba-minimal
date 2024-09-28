@@ -31,6 +31,7 @@ import torch.nn.functional as F
 from dataclasses import dataclass
 from einops import rearrange, repeat, einsum
 import einops
+import numpy as np
 
 
 @dataclass
@@ -213,9 +214,9 @@ class MambaBlock(nn.Module):
         # L = torch.zeros((args.batch_size, self.args.d_state), device=self.A_log.device)
         L = torch.normal(0,math.sqrt(1/8)/3,(self.args.d_state,), device=self.A_log.device)
         self.L = nn.Parameter(L)
-        # self.L = L
-        self.ress = 0
-        self.B = 0
+        
+        self.Q = nn.Parameter(torch.eye(self.args.d_state))
+        self.R = nn.Parameter(torch.eye(1))
 
     def forward(self, x, Luen_grad=None):
         """Mamba block forward. This looks the same as Figure 3 in Section 3.4 in the Mamba paper [1].
@@ -247,7 +248,7 @@ class MambaBlock(nn.Module):
         self.xs2 = x.shape
 
         if Luen_grad is None:
-            Luen_grad = torch.zeros(b,l,64)
+            Luen_grad = torch.zeros(b,l,self.args.d_inner)
         self.Luen_grad = Luen_grad
 
         y = self.ssm(x, Luen_grad)
@@ -350,7 +351,7 @@ class MambaBlock(nn.Module):
 
         grad = Luen_grad[:b]
         L = repeat(self.L,'n -> b l n',b=b,l=l) # 每个batch、每个length一样
-        deltaL_grad = einsum(delta, L, grad, 'b l d_in, b l n, b l d_in -> b l d_in n').to(deltaA.device)
+        delta_grad = einsum(delta, grad, 'b l d_in, b l d_in -> b l d_in n').to(deltaA.device)
         # 注：最后一个训练batch中数据的batchsize小于最初设定，直接切片
         #     在测试集中size如果大于grad的尺寸，这里会报错，所以用dataloader
 
@@ -359,14 +360,20 @@ class MambaBlock(nn.Module):
         # is additionally hardware-aware (like FlashAttention).
 
         x = torch.zeros((b, d_in, n), device=deltaA.device) 
+        P = torch.eye(n)  # 设置参数 d_in = n
 
         ys = []    
         for i in range(l):
             # # luen  grad尺寸时变，L尺寸固定为batch_size
             # x = deltaA[:b, i] * x + deltaB_u[:b, i] + deltaL_grad[:, i] # 改动3 
             # karman
-
-            x = deltaA[:b, i] * x + deltaB_u[:b, i] + deltaL_grad[:, i]
+            x = deltaA[:b, i] * x + deltaB_u[:b, i]
+            for j in range(b):
+                P = (A[j,i]@P)@A[j,i].T+self.Q
+                Ct = C[j,i].view(1,n)
+                K = P*torch.inverse(Ct@P@Ct.T+self.R)
+                P = (torch.eye(n)-einops.einsum(K, Ct, 'd_in n,o n -> d_in n'))@P
+            x = x + einops.einsum(K, grad[:,i], 'd_in n,b d_in ->b d_in n')
 
             y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
             ys.append(y)
