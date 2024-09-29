@@ -375,15 +375,15 @@ class MambaBlock(nn.Module):
                 P = (deltaA[j,i]@P)@deltaA[j,i].T+self.Q
                 # print(P)
                 Ct = C[j,i].view(1,n)
-                K = (P@Ct.T)*torch.inverse(Ct@P@Ct.T+self.R)
-                P = (torch.eye(n)-K@Ct)*P
+                K = (P@Ct.T)@torch.inverse(Ct@P@Ct.T+self.R)
+                P = (torch.eye(n)-K@Ct)@P
             x = x + einops.einsum(delta[:,i], K, grad[:,i], 'b d_in, d_in n, b d_in ->b d_in n')
 
             y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
             ys.append(y)
         y = torch.stack(ys, dim=1)  # shape (b, l, d_in)
         
-        y = y + u * D
+        y = y + u * D   
         return y
 
   
