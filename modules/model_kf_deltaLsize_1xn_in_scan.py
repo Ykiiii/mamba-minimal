@@ -216,6 +216,7 @@ class MambaBlock(nn.Module):
         self.L = nn.Parameter(L)
         
         self.Q = nn.Parameter(torch.eye(self.args.d_state))
+        self.P = nn.Parameter(torch.eye(self.args.d_state))
         self.R = nn.Parameter(torch.eye(1))
 
     def forward(self, x, Luen_grad=None):
@@ -362,7 +363,7 @@ class MambaBlock(nn.Module):
         # is additionally hardware-aware (like FlashAttention).
 
         x = torch.zeros((b, d_in, n), device=deltaA.device) 
-        P = torch.eye(n)  # 设置参数 d_in = n
+        P = self.P  # 设置参数 d_in = n
 
         ys = []    
         for i in range(l):
