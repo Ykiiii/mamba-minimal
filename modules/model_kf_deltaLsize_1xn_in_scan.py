@@ -376,7 +376,7 @@ class MambaBlock(nn.Module):
                 # print(P)
                 Ct = C[j,i].view(1,n)
                 K = (P@Ct.T)*torch.inverse(Ct@P@Ct.T+self.R)
-                P = (torch.eye(n)-einops.einsum(K, Ct, 'd_in n,o n -> d_in n'))@P
+                P = (torch.eye(n)-K@Ct)*P
             x = x + einops.einsum(delta[:,i], K, grad[:,i], 'b d_in, d_in n, b d_in ->b d_in n')
 
             y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
