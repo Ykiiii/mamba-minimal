@@ -363,7 +363,7 @@ class MambaBlock(nn.Module):
         # is additionally hardware-aware (like FlashAttention).
 
         x = torch.zeros((b, d_in, n), device=deltaA.device) 
-        P = self.P  # 设置参数 d_in = n
+        P,Q,R = self.P.clone(),self.Q.clone(),self.R.clone()  # 设置参数 d_in = n
 
         ys = []    
         for i in range(l):
@@ -371,14 +371,14 @@ class MambaBlock(nn.Module):
             # x = deltaA[:b, i] * x + deltaB_u[:b, i] # 改动3 
             # karman
             x = deltaA[:b, i] * x + deltaB_u[:b, i]
-            for j in range(b):
-                P = (deltaA[j,i]@P)@deltaA[j,i].T+self.Q
-                # print(P)
-                Ct = C[j,i].view(1,n)
-                K = (P@Ct.T)@torch.inverse(Ct@P@Ct.T+self.R)
-                P = (torch.eye(n)-K@Ct)*P
-            x = x + einops.einsum(delta[:,i], K, grad[:,i], 'b d_in, d_in n, b d_in ->b d_in n')
-
+            A = deltaA.clone()
+            # for j in range(b):
+            P = (deltaA[-1,i]@P)@deltaA[-1,i].T+Q
+            Ct = C[-1,i].view(1,n)
+            K = (P@Ct.T)@torch.inverse(Ct@P@Ct.T+R)
+            P = (torch.eye(n)-K@Ct)@P
+            x = x + einops.einsum(K, grad[:,i], 'd_in o,b d_in->b d_in o')
+            
             y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
             ys.append(y)
         y = torch.stack(ys, dim=1)  # shape (b, l, d_in)
