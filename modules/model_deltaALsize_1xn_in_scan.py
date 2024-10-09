@@ -213,8 +213,11 @@ class MambaBlock(nn.Module):
         # L = torch.zeros((args.batch_size, self.args.d_state), device=self.A_log.device)
         L = torch.normal(0,math.sqrt(1/8)/3,(self.args.d_state,), device=self.A_log.device)
         self.L = nn.Parameter(L)
+        # self.L = L
         self.ress = 0
         self.B = 0
+        self.deltaL = None
+        self.C = None
 
     def forward(self, x, Luen_grad=None):
         """Mamba block forward. This looks the same as Figure 3 in Section 3.4 in the Mamba paper [1].
@@ -246,7 +249,7 @@ class MambaBlock(nn.Module):
         self.xs2 = x.shape
 
         if Luen_grad is None:
-            Luen_grad = torch.zeros(b,l,64)
+            Luen_grad = torch.zeros(b,l,self.args.d_inner)
         self.Luen_grad = Luen_grad
 
         y = self.ssm(x, Luen_grad)
@@ -291,6 +294,7 @@ class MambaBlock(nn.Module):
         # grad (batchsize,l,64)
         delta = F.softplus(self.dt_proj(delta))  # (b, l, d_in)
         # grad (batchsize,l,64)
+        self.C = C
         self.As = A.shape
         self.Bs = B.shape
         self.Cs = C.shape
@@ -334,7 +338,7 @@ class MambaBlock(nn.Module):
         (b, l, d_in) = u.shape
         self.batch = b
         n = A.shape[1]
-        
+        # b = min(u.shape[0],Luen_grad.shape[0])
         # Discretize continuous parameters (A, B)
         # - A is discretized using zero-order hold (ZOH) discretization (see Section 2 Equation 4 in the Mamba paper [1])
         # - B is discretized using a simplified Euler discretization instead of ZOH. From a discussion with authors:
@@ -343,13 +347,16 @@ class MambaBlock(nn.Module):
         # 进入for之前先处理一遍u
         
         deltaA = torch.exp(einsum(delta, A, 'b l d_in, d_in n -> b l d_in n')) # deltaA=exp(delta*A)
-        deltaB_u = einsum(delta, B, u, 'b l d_in, b l n, b l d_in -> b l d_in n')
         self.deltaA = deltaA
+        
+        deltaB_u = einsum(delta, B, u, 'b l d_in, b l n, b l d_in -> b l d_in n')
         self.deltaB_u = deltaB_u
 
         grad = Luen_grad[:b]
-        L = repeat(self.L,'n -> b l n',l=l,b=b) # 每个batch一样
-        deltaL_grad = einsum(delta, L, grad, 'b l d_in,b l n, b l d_in -> b l d_in n').to(deltaA.device)
+        L = repeat(self.L,'n -> b l n',b=b,l=l) # 也可直接设置L(b l n)
+        # self.deltaL = einsum(delta, L, 'b l d_in, b l n -> b l d_in n')
+        deltaL_grad = einsum(delta, L, grad, 'b l d_in, b l n, b l d_in -> b l d_in n').to(deltaA.device)
+        # deltaL_grad = einsum(deltaA, L, grad, 'b l d_in n,b l n, b l d_in -> b l d_in n').to(deltaA.device)  # luen增益离散化
         # 注：最后一个训练batch中数据的batchsize小于最初设定，直接切片
         #     在测试集中size如果大于grad的尺寸，这里会报错，所以用dataloader
 
