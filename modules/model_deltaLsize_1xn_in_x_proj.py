@@ -348,7 +348,9 @@ class MambaBlock(nn.Module):
 
         grad = Luen_grad[:b]
         # L = repeat(self.L,'n -> b l n',l=l,b=b) # 每个batch一样
-        deltaL_grad = einsum(delta, L, grad, 'b l d_in,b l n, b l d_in -> b l d_in n').to(deltaA.device)
+        # deltaL_grad = einsum(delta, L, grad, 'b l d_in,b l n, b l d_in -> b l d_in n').to(deltaA.device)
+        deltaL_grad = einsum(L, grad, 'b l n, b l d_in -> b l d_in n').to(deltaA.device)
+
         # 注：最后一个训练batch中数据的batchsize小于最初设定，直接切片
         #     在测试集中size如果大于grad的尺寸，这里会报错，所以用dataloader
 
