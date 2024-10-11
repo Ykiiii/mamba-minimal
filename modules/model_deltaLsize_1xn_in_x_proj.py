@@ -347,7 +347,7 @@ class MambaBlock(nn.Module):
         self.deltaB_u = deltaB_u
 
         grad = Luen_grad[:b]
-        # L = repeat(self.L,'n -> b l n',l=l,b=b) # 每个batch一样
+        # L = repeat(self.L,'n -> b l n',l=l,b=b) # 重复每个batch一样
         # deltaL_grad = einsum(delta, L, grad, 'b l d_in,b l n, b l d_in -> b l d_in n').to(deltaA.device)
         deltaL_grad = einsum(L, grad, 'b l n, b l d_in -> b l d_in n').to(deltaA.device)
 
