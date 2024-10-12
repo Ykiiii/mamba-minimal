@@ -236,13 +236,14 @@ class MambaBlock(nn.Module):
         
         x_and_res = self.in_proj(x)  # shape (b, l, 2 * d_in)
         (x, res) = x_and_res.split(split_size=[self.args.d_inner, self.args.d_inner], dim=-1)
-        self.ress = res
+        
 
         x = rearrange(x, 'b l d_in -> b d_in l')
         x = self.conv1d(x)[:, :, :l]
         x = rearrange(x, 'b d_in l -> b l d_in')
         
         x = F.silu(x)
+        self.ress = x
         self.xs2 = x.shape
 
         if Luen_grad is None:
