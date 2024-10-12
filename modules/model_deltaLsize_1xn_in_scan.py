@@ -243,7 +243,7 @@ class MambaBlock(nn.Module):
         x = rearrange(x, 'b d_in l -> b l d_in')
         
         x = F.silu(x)
-        self.ress = x
+        
         self.xs2 = x.shape
 
         if Luen_grad is None:
@@ -254,6 +254,7 @@ class MambaBlock(nn.Module):
         # self.intermediate_output = y.clone().detach().requires_grad_(True)
         self.intermediate_output = y
         res_silued = F.silu(res)
+        self.ress = res_silued
         y = self.intermediate_output * res_silued  # 应该是res的梯度，loss对res的偏导，才是L*e
         
         output = self.out_proj(y)
