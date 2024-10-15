@@ -236,9 +236,6 @@ class MambaBlock(nn.Module):
         
         x_and_res = self.in_proj(x)  # shape (b, l, 2 * d_in)
         (x, res) = x_and_res.split(split_size=[self.args.d_inner, self.args.d_inner], dim=-1)
-        res_silued = F.silu(res)
-        self.ress = res_silued
-        
 
         x = rearrange(x, 'b l d_in -> b d_in l')
         x = self.conv1d(x)[:, :, :l]
@@ -251,10 +248,11 @@ class MambaBlock(nn.Module):
             Luen_grad = torch.zeros(b,l,self.args.d_inner)
         self.Luen_grad = Luen_grad
 
-        y = self.ssm(x, Luen_grad)
-        # self.intermediate_output = y.clone().detach().requires_grad_(True)
+        res_silued = F.silu(res)
+        self.ress = res_silued
 
-        y = y * res_silued  
+        y = self.ssm(x, Luen_grad)
+        y = self.intermediate_output * res_silued  # 应该是res的梯度，loss对res的偏导，才是L*e
         self.intermediate_output = y
         output = self.out_proj(y)
 
@@ -291,7 +289,7 @@ class MambaBlock(nn.Module):
         (delta, B, C) = x_dbl.split(split_size=[self.args.dt_rank, n, n], dim=-1)  # delta: (b, l, dt_rank). B, C: (b, l, n)
         # grad (batchsize,l,64)
         delta = F.softplus(self.dt_proj(delta))  # (b, l, d_in)
-        L = self.lu_proj(self.ress**-1)
+        L = self.lu_proj(self.ress)
         # grad (batchsize,l,64)
         # self.As = A.shape
         # self.Bs = B.shape

@@ -247,6 +247,7 @@ class MambaBlock(nn.Module):
         x = rearrange(x, 'b d_in l -> b l d_in')
         
         x = F.silu(x)
+        self.ress = x
         self.xs2 = x.shape
 
         # if Luen_grad is None:
