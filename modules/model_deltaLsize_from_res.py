@@ -289,7 +289,7 @@ class MambaBlock(nn.Module):
         (delta, B, C) = x_dbl.split(split_size=[self.args.dt_rank, n, n], dim=-1)  # delta: (b, l, dt_rank). B, C: (b, l, n)
         # grad (batchsize,l,64)
         delta = F.softplus(self.dt_proj(delta))  # (b, l, d_in)
-        L = self.lu_proj(self.ress)
+        L = self.lu_proj(self.ress**-1)
         # grad (batchsize,l,64)
         # self.As = A.shape
         # self.Bs = B.shape
