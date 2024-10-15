@@ -227,7 +227,7 @@ class Mamba2(nn.Module):
         Arguments
             u: (batch, seqlen, d_model) input. seqlen should be a multiple of chunk_size.
             h: hidden states for inference step. Initialized to 0s if not present.
-
+[]
         Return (y, h)
             y: (batch, seqlen, d_model) output
             h: updated inference cache after processing `u`

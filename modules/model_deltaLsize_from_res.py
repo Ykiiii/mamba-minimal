@@ -197,7 +197,7 @@ class MambaBlock(nn.Module):
         )
 
         # x_proj takes in `x` and outputs the input-specific Δ, B, C
-        self.x_proj = nn.Linear(args.d_inner, args.dt_rank + args.d_state * 3, bias=False)
+        self.x_proj = nn.Linear(args.d_inner, args.dt_rank + args.d_state * 2, bias=False)
         
         # dt_proj projects Δ from dt_rank to d_in
         self.dt_proj = nn.Linear(args.dt_rank, args.d_inner, bias=True)
@@ -210,6 +210,7 @@ class MambaBlock(nn.Module):
         # L（b,n） ,grad(b,l,d_in), grad取自ssm的输出，
         # L 的尺寸有讲究
         self.intermediate_output = None # 初始化hook，提取grad
+        self.lu_proj = nn.Linear(args.d_inner, args.d_state, bias=False)
         # L = torch.zeros((args.batch_size, self.args.d_state), device=self.A_log.device)
         # L = torch.normal(0,math.sqrt(1/8)/3,(self.args.d_state,), device=self.A_log.device)
         # self.L = nn.Parameter(L)
@@ -235,6 +236,8 @@ class MambaBlock(nn.Module):
         
         x_and_res = self.in_proj(x)  # shape (b, l, 2 * d_in)
         (x, res) = x_and_res.split(split_size=[self.args.d_inner, self.args.d_inner], dim=-1)
+        res_silued = F.silu(res)
+        self.ress = res_silued
         
 
         x = rearrange(x, 'b l d_in -> b d_in l')
@@ -250,8 +253,7 @@ class MambaBlock(nn.Module):
 
         y = self.ssm(x, Luen_grad)
         # self.intermediate_output = y.clone().detach().requires_grad_(True)
-        res_silued = F.silu(res)
-        self.ress = res_silued
+
         y = y * res_silued  
         self.intermediate_output = y
         output = self.out_proj(y)
@@ -284,11 +286,12 @@ class MambaBlock(nn.Module):
         A = -torch.exp(self.A_log.float())  # shape (d_in, n)
         D = self.D.float()
         # grad (batchsize,l,34)
-        x_dbl = self.x_proj(x)  # (b, l, dt_rank + 3*n)
+        x_dbl = self.x_proj(x)  # (b, l, dt_rank + 2*n)
         # grad (batchsize,l,34)
-        (delta, B, C, L) = x_dbl.split(split_size=[self.args.dt_rank, n, n, n], dim=-1)  # delta: (b, l, dt_rank). B, C, L: (b, l, n)
+        (delta, B, C) = x_dbl.split(split_size=[self.args.dt_rank, n, n], dim=-1)  # delta: (b, l, dt_rank). B, C: (b, l, n)
         # grad (batchsize,l,64)
         delta = F.softplus(self.dt_proj(delta))  # (b, l, d_in)
+        L = self.lu_proj(self.ress)
         # grad (batchsize,l,64)
         # self.As = A.shape
         # self.Bs = B.shape
