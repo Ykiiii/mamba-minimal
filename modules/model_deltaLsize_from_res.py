@@ -210,7 +210,7 @@ class MambaBlock(nn.Module):
         # L（b,n） ,grad(b,l,d_in), grad取自ssm的输出，
         # L 的尺寸有讲究
         self.intermediate_output = None # 初始化hook，提取grad
-        self.lu_proj = nn.Linear(args.d_inner, args.d_state, bias=True)
+        self.lu_proj = nn.Linear(args.d_inner, args.d_state, bias=False)
         # L = torch.zeros((args.batch_size, self.args.d_state), device=self.A_log.device)
         # L = torch.normal(0,math.sqrt(1/8)/3,(self.args.d_state,), device=self.A_log.device)
         # self.L = nn.Parameter(L)
