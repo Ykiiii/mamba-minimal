@@ -252,6 +252,7 @@ class MambaBlock(nn.Module):
         self.ress = res_silued
 
         y = self.ssm(x, Luen_grad)
+        
         y = y * res_silued  # 应该是res的梯度，loss对res的偏导，才是L*e
         self.intermediate_output = y
         output = self.out_proj(y)
@@ -289,7 +290,7 @@ class MambaBlock(nn.Module):
         (delta, B, C) = x_dbl.split(split_size=[self.args.dt_rank, n, n], dim=-1)  # delta: (b, l, dt_rank). B, C: (b, l, n)
         # grad (batchsize,l,64)
         delta = F.softplus(self.dt_proj(delta))  # (b, l, d_in)
-        L = self.lu_proj(self.ress)
+        L = F.tanh(self.lu_proj(self.ress**-1))
         # grad (batchsize,l,64)
         # self.As = A.shape
         # self.Bs = B.shape
